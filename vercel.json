@@ -1,0 +1,7 @@
+{
+  "buildCommand": "cd portal-fiscal && npm run build",
+  "devCommand": "cd portal-fiscal && npm run dev",
+  "installCommand": "cd portal-fiscal && npm install",
+  "framework": "nextjs",
+  "outputDirectory": "portal-fiscal/.next"
+}
