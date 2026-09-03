@@ -1,0 +1,16 @@
+
+> portal-fiscal@0.1.0 dev
+> next dev -p 4000 -H 127.0.0.1
+
+▲ Next.js 16.2.12 (Turbopack)
+- Local:         http://127.0.0.1:4000
+- Network:       http://127.0.0.1:4000
+- Environments: .env
+✓ Ready in 2.5s
+
+ GET / 200 in 15.7s (next.js: 1472ms, application-code: 14.2s)
+ GET / 200 in 1453ms (next.js: 25ms, application-code: 1427ms)
+✓ Compiled in 3.2s
+ GET /api/cron/sync-fiscal 200 in 10.8s (next.js: 1640ms, application-code: 9.1s)
+ GET /api/cron/sync-fiscal 200 in 2.9s (next.js: 248ms, application-code: 2.6s)
+ GET /login 200 in 5.8s (next.js: 2.3s, application-code: 3.5s)

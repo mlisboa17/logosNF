@@ -1,0 +1,321 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  ACCOUNTANT
+  VIEWER
+}
+
+enum CompanyStatus {
+  PENDING_CERTIFICATE
+  READY
+  PAUSED
+}
+
+enum FiscalEnvironment {
+  RESTRICTED
+  PRODUCTION
+}
+
+enum DocumentKind {
+  NFSE
+  NFSE_EVENT
+  NFE
+  NFE_EVENT
+}
+
+enum ManifestationStatus {
+  NOT_APPLICABLE
+  PENDING
+  SCIENCE
+  CONFIRMED
+  UNKNOWN_OPERATION
+  NOT_PERFORMED
+}
+
+enum SyncStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  RATE_LIMITED
+}
+
+enum ErpIntegrationStatus {
+  PENDING
+  QUEUED
+  ACCEPTED
+  ERROR
+  REPROCESSED
+}
+
+enum PlanType {
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  SUSPENDED
+}
+
+model Organization {
+  id                  String             @id @default(cuid())
+  name                String
+  plan                PlanType           @default(STARTER)
+  subscriptionStatus  SubscriptionStatus @default(ACTIVE)
+  maxCompanies        Int                @default(3)
+  maxMonthlyDocuments Int                @default(1000)
+  billingEmail        String?
+  memberships         Membership[]
+  companies           Company[]
+  auditEntries        AuditEntry[]
+  apiKeys             ApiKey[]
+  webhookEndpoints    WebhookEndpoint[]
+  invitations         Invitation[]
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+}
+
+model User {
+  id                  String               @id @default(cuid())
+  email               String               @unique
+  name                String
+  passwordHash        String
+  twoFactorEnabled    Boolean              @default(false)
+  twoFactorSecret     String?
+  termsAcceptedAt     DateTime?
+  privacyAcceptedAt   DateTime?
+  memberships         Membership[]
+  sessions            Session[]
+  passwordResetTokens PasswordResetToken[]
+  auditEntries        AuditEntry[]
+  invitationsCreated  Invitation[]         @relation("InvitedBy")
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+model Membership {
+  organizationId String
+  userId         String
+  role           MemberRole   @default(VIEWER)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, userId])
+}
+
+model Company {
+  id              String            @id @default(cuid())
+  organizationId  String
+  legalName       String
+  tradeName       String?
+  cnpj            String            @unique
+  status          CompanyStatus     @default(PENDING_CERTIFICATE)
+  nfseEnvironment FiscalEnvironment @default(RESTRICTED)
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  certificate     CertificateRef?
+  cursors         SyncCursor[]
+  syncRuns        SyncRun[]
+  documents       FiscalDocument[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([organizationId])
+  @@index([status]) // Queries para empresas READY
+  @@index([organizationId, status]) // Filtros combinados
+}
+
+// Guarda apenas a referência do segredo. O PFX e a senha ficam em um cofre/KMS.
+model CertificateRef {
+  id             String   @id @default(cuid())
+  companyId      String   @unique
+  secretProvider String
+  secretKey      String
+  fingerprint    String   @unique
+  subject        String
+  validFrom      DateTime
+  validUntil     DateTime
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model SyncCursor {
+  id         String    @id @default(cuid())
+  companyId  String
+  source     String
+  lastNsu    BigInt    @default(0)
+  lastSyncAt DateTime?
+  company    Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([companyId, source])
+}
+
+model SyncRun {
+  id            String     @id @default(cuid())
+  companyId     String
+  source        String
+  status        SyncStatus
+  startedAt     DateTime   @default(now())
+  finishedAt    DateTime?
+  startNsu      BigInt
+  endNsu        BigInt?
+  documentCount Int        @default(0)
+  errorCode     String?
+  errorMessage  String?
+  company       Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, startedAt])
+}
+
+model FiscalDocument {
+  id                  String               @id @default(cuid())
+  companyId           String
+  kind                DocumentKind
+  source              String
+  nsu                 BigInt
+  accessKey           String?
+  issuerTaxId         String?
+  recipientTaxId      String?
+  issuedAt            DateTime?
+  serviceDate         DateTime?
+  totalAmount         Float?
+  xmlObjectKey        String
+  xmlSha256           String
+  rawMetadata         String?
+  manifestationStatus ManifestationStatus  @default(NOT_APPLICABLE)
+  manifestedAt        DateTime?
+  lastDownloadedAt    DateTime?
+  erpStatus           ErpIntegrationStatus @default(PENDING)
+  erpStatusMessage    String?
+  erpSyncedAt         DateTime?
+  company             Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@unique([companyId, source, nsu]) // Garante idempotência
+  @@index([companyId, issuedAt])
+  @@index([accessKey]) // Busca por chave de acesso
+  @@index([companyId, erpStatus]) // Filtro para sincronização ERP
+  @@index([companyId, createdAt]) // Para listagens recentes
+  @@index([companyId, manifestationStatus]) // Filtra por manifestação
+  @@index([issuerTaxId]) // Busca por emitente
+  @@index([recipientTaxId]) // Busca por destinatário
+  @@index([kind]) // Filtro por tipo de documento
+}
+
+model AuditEntry {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String?
+  action         String
+  entityType     String
+  entityId       String?
+  ipHash         String?
+  metadata       String?
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, createdAt]) // Consulta principal por org e período
+  @@index([userId, createdAt]) // Auditoria por usuário
+  @@index([action]) // Filtro por tipo de ação
+  @@index([entityType, entityId]) // Rastreamento de entidade
+}
+
+model ApiKey {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  keyPrefix      String
+  keyHash        String       @unique
+  scopes         String       @default("documents:read,documents:write")
+  expiresAt      DateTime?
+  lastUsedAt     DateTime?
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+}
+
+model WebhookEndpoint {
+  id             String            @id @default(cuid())
+  organizationId String
+  url            String
+  secret         String
+  events         String            @default("*")
+  active         Boolean           @default(true)
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries     WebhookDelivery[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([organizationId])
+}
+
+model WebhookDelivery {
+  id           String          @id @default(cuid())
+  endpointId   String
+  event        String
+  payload      String?
+  statusCode   Int?
+  responseBody String?
+  attempt      Int             @default(1)
+  status       String          @default("DELIVERED")
+  endpoint     WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  createdAt    DateTime        @default(now())
+
+  @@index([endpointId, createdAt])
+}
+
+model Invitation {
+  id             String       @id @default(cuid())
+  organizationId String
+  email          String
+  role           MemberRole   @default(VIEWER)
+  tokenHash      String       @unique
+  expiresAt      DateTime
+  usedAt         DateTime?
+  createdById    String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy      User         @relation("InvitedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, email])
+}
